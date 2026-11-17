@@ -1,0 +1,1381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050510">
+  <title>Galaxian — Star Patrol</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Courier New", monospace;
+      background: #050510;
+      color: #e8f4ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+      overflow-y: auto;
+      background: radial-gradient(ellipse at 50% 45%, #10112c 0, #080816 45%, #030309 100%);
+    }
+
+    main {
+      width: min(100vw, 600px);
+      padding: 12px;
+      margin: auto;
+    }
+
+    .cabinet {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3 / 4;
+      overflow: hidden;
+      border: 2px solid #293d68;
+      background: #050510;
+      box-shadow: 0 0 24px #2464b855, inset 0 0 24px #14235b55;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+
+    .help {
+      margin: 0;
+      color: #9daed0;
+      font-size: 11px;
+      text-align: center;
+      letter-spacing: .08em;
+    }
+
+    .help strong { color: #f3db79; font-weight: normal; }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .help { font-size: 10px; }
+
+    #pause {
+      border: 1px solid #536a99;
+      border-radius: 3px;
+      padding: 6px 12px;
+      background: #11182e;
+      color: #e8f4ff;
+      font: bold 11px "Courier New", monospace;
+      letter-spacing: .08em;
+      cursor: pointer;
+    }
+
+    #pause:hover:not(:disabled) {
+      border-color: #9dc8ff;
+      background: #1b2948;
+    }
+
+    #pause:disabled {
+      opacity: .48;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="cabinet">
+      <canvas id="game" width="600" height="800" aria-label="Galaxian arcade game"></canvas>
+    </div>
+    <div class="controls">
+      <p class="help"><strong>MOVE</strong> ← → / A-D &nbsp; <strong>FIRE</strong> SPACE &nbsp; <strong>FLAME</strong> HOLD 2S &nbsp; <strong>BOMB</strong> Z &nbsp; <strong>FREEZE</strong> X &nbsp; <strong>SHIELD</strong> S &nbsp; <strong>PAUSE</strong> ESC</p>
+      <button id="pause" type="button" disabled>PAUSE</button>
+    </div>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+
+      const canvas = document.querySelector("#game");
+      const ctx = canvas.getContext("2d");
+      const pauseButton = document.querySelector("#pause");
+      const W = canvas.width;
+      const H = canvas.height;
+      const MAX_GUNS = 6;
+      const MAX_SUPER_BOMBS = 3;
+      const BOMB_BLAST_RADIUS = 100;
+      const MAX_FREEZE_ARROWS = 4;
+      const FREEZE_RADIUS = 100;
+      const FREEZE_DURATION = 3;
+      const SHIELD_DURATION = 5;
+      const MAX_RAPID_GUNS = 3;
+      const RAPID_CHARGE_TIME = 2;
+      const RAPID_DURATION = 3;
+      const RAPID_SHOT_INTERVAL = 0.075;
+      const MAX_DOG_VISITS_PER_STAGE = 4;
+      const DOG_INTERVAL_MIN = 5;
+      const DOG_INTERVAL_MAX = 14;
+      const keys = new Set();
+      const riddles = [
+        { question: "What has keys but no locks and space but no room?", answers: ["keyboard"] },
+        { question: "What gets wetter the more it dries?", answers: ["towel"] },
+        { question: "What has a face and two hands but no arms or legs?", answers: ["clock"] },
+        { question: "What must be broken before you can use it?", answers: ["egg", "an egg"] },
+        { question: "What goes up but never comes down?", answers: ["age", "your age"] },
+        { question: "What has one eye but cannot see?", answers: ["needle", "a needle"] },
+        { question: "What has a neck but no head?", answers: ["bottle", "a bottle"] },
+        { question: "What has many teeth but cannot bite?", answers: ["comb", "a comb"] },
+        { question: "What has hands but cannot clap?", answers: ["clock", "a clock"] },
+        { question: "What can travel around the world while staying in one corner?", answers: ["stamp", "a stamp"] },
+        { question: "What has a thumb and four fingers but is not alive?", answers: ["glove", "a glove"] },
+        { question: "What has words but never speaks?", answers: ["book", "a book"] },
+        { question: "What has cities but no houses, forests but no trees, and water but no fish?", answers: ["map", "a map"] },
+        { question: "What kind of band never plays music?", answers: ["rubber band", "a rubber band"] },
+        { question: "What has legs but never walks?", answers: ["table", "a table"] },
+        { question: "What has a ring but no finger?", answers: ["telephone", "phone"] },
+        { question: "What has ears but cannot hear?", answers: ["corn", "an ear of corn"] },
+        { question: "What is full of holes but still holds water?", answers: ["sponge", "a sponge"] },
+        { question: "What building has the most stories?", answers: ["library", "a library"] },
+        { question: "What begins with T, ends with T, and has T inside?", answers: ["teapot", "a teapot"] },
+        { question: "What has four wheels and flies?", answers: ["garbage truck", "a garbage truck", "trash truck"] },
+        { question: "What goes through towns and over hills but never moves?", answers: ["road", "a road"] },
+        { question: "What has a head and a tail but no body?", answers: ["coin", "a coin"] },
+        { question: "What is always in front of you but cannot be seen?", answers: ["future", "the future"] },
+        { question: "What has branches but no fruit, trunk, or leaves?", answers: ["bank", "a bank"] },
+        { question: "What can you catch but not throw?", answers: ["cold", "a cold"] }
+      ];
+      const colors = {
+        white: "#f5f7ff",
+        gold: "#ffe45c",
+        red: "#ff456b",
+        purple: "#c66bff",
+        blue: "#57caff",
+        cyan: "#89fff3"
+      };
+
+      let state = "title";
+      let pausedFrom = null;
+      let score = 0;
+      let highScore = loadHighScore();
+      let stage = 1;
+      let lives = MAX_GUNS;
+      let superBombs = MAX_SUPER_BOMBS;
+      let freezeArrows = MAX_FREEZE_ARROWS;
+      let rapidGuns = MAX_RAPID_GUNS;
+      let rapidModeTimer = 0;
+      let rapidChargeTimer = 0;
+      let rapidFireTimer = 0;
+      let spaceNeedsRelease = false;
+      let dogsThisStage = 0;
+      let dogVisitTimer = null;
+      let dogArrivalTimer = 0;
+      let activeRiddle = null;
+      let riddleDeck = [];
+      let lastRiddle = null;
+      let riddleAnswer = "";
+      let riddleFeedback = "";
+      let shieldTimer = 0;
+      let ship = { x: W / 2, y: H - 74, speed: 370, invulnerable: 0, fireTimer: 0 };
+      let playerBullet = null;
+      let freezeArrow = null;
+      let freezeBurst = null;
+      let rapidBullets = [];
+      let bombProjectile = null;
+      let bombBlast = null;
+      let enemyBullets = [];
+      let aliens = [];
+      let particles = [];
+      let popups = [];
+      let stars = [];
+      let elapsed = 0;
+      let diveTimer = 1.4;
+      let formationPhase = 0;
+      let stageTimer = 0;
+      let lastTime = 0;
+      let audio = null;
+      let humOsc = null;
+      let humGain = null;
+      let humFilter = null;
+
+      function loadHighScore() {
+        try {
+          return Number(localStorage.getItem("galaxian-high-score")) || 0;
+        } catch (error) {
+          console.warn("High score storage is unavailable.", error);
+          return 0;
+        }
+      }
+
+      function canPause() {
+        return state === "playing" || state === "stage" || state === "riddle";
+      }
+
+      function syncPauseButton() {
+        pauseButton.disabled = state !== "paused" && !canPause();
+        pauseButton.textContent = state === "paused" ? "RESUME" : "PAUSE";
+        pauseButton.setAttribute("aria-pressed", String(state === "paused"));
+      }
+
+      function togglePause() {
+        if (state === "paused") {
+          state = pausedFrom;
+          pausedFrom = null;
+        } else if (canPause()) {
+          pausedFrom = state;
+          state = "paused";
+          keys.clear();
+          rapidChargeTimer = 0;
+          spaceNeedsRelease = true;
+        }
+        syncPauseButton();
+      }
+
+      function saveHighScore() {
+        try {
+          localStorage.setItem("galaxian-high-score", String(highScore));
+        } catch (error) {
+          console.warn("Could not save the high score.", error);
+        }
+      }
+
+      function initStars() {
+        const palette = ["#ffffff", "#7bbcff", "#ff687d", "#ffe48a"];
+        stars = Array.from({ length: 115 }, () => ({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          speed: 18 + Math.random() * 76,
+          size: Math.random() < 0.16 ? 2 : 1,
+          color: palette[Math.floor(Math.random() * palette.length)],
+          phase: Math.random() * Math.PI * 2
+        }));
+      }
+
+      function makeWave() {
+        aliens = [];
+        freezeArrows = MAX_FREEZE_ARROWS;
+        dogsThisStage = 0;
+        dogVisitTimer = null;
+        const rows = [
+          { type: "flagship", count: 2, y: 112, spacing: 86 },
+          { type: "escort", count: 8, y: 158, spacing: 53 },
+          { type: "purple", count: 10, y: 204, spacing: 48 },
+          { type: "drone", count: 10, y: 247, spacing: 48 },
+          { type: "drone", count: 10, y: 286, spacing: 48 },
+          { type: "drone", count: 10, y: 325, spacing: 48 }
+        ];
+
+        for (const row of rows) {
+          const startX = W / 2 - ((row.count - 1) * row.spacing) / 2;
+          for (let col = 0; col < row.count; col++) {
+            aliens.push({
+              type: row.type,
+              col,
+              rowY: row.y,
+              baseX: startX + col * row.spacing,
+              x: startX + col * row.spacing,
+              y: row.y,
+              frozenTimer: 0,
+              diving: false,
+              returning: 0,
+              diveTime: 0,
+              diveDuration: 4.2 + Math.random() * 0.8,
+              startX: 0,
+              escortLeader: null,
+              escorts: [],
+              anim: Math.random() * 10
+            });
+          }
+        }
+        enemyBullets = [];
+        playerBullet = null;
+        freezeArrow = null;
+        freezeBurst = null;
+        rapidBullets = [];
+        bombProjectile = null;
+        diveTimer = Math.max(0.65, 2.4 - stage * 0.12);
+      }
+
+      function startGame() {
+        score = 0;
+        stage = 1;
+        lives = MAX_GUNS;
+        superBombs = MAX_SUPER_BOMBS;
+        freezeArrows = MAX_FREEZE_ARROWS;
+        rapidGuns = MAX_RAPID_GUNS;
+        rapidModeTimer = 0;
+        rapidChargeTimer = 0;
+        rapidFireTimer = 0;
+        spaceNeedsRelease = false;
+        dogsThisStage = 0;
+        dogVisitTimer = null;
+        activeRiddle = null;
+        riddleDeck = [];
+        lastRiddle = null;
+        riddleAnswer = "";
+        riddleFeedback = "";
+        pausedFrom = null;
+        shieldTimer = 0;
+        ship.x = W / 2;
+        ship.invulnerable = 0;
+        rapidBullets = [];
+        freezeArrow = null;
+        freezeBurst = null;
+        bombProjectile = null;
+        bombBlast = null;
+        particles = [];
+        popups = [];
+        state = "playing";
+        makeWave();
+        unlockAudio();
+        syncPauseButton();
+      }
+
+      function unlockAudio() {
+        if (audio) {
+          if (audio.state === "suspended") audio.resume();
+          return;
+        }
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        audio = new AudioContext();
+        humOsc = audio.createOscillator();
+        humGain = audio.createGain();
+        humFilter = audio.createBiquadFilter();
+        humOsc.type = "triangle";
+        humOsc.frequency.value = 48;
+        humGain.gain.value = 0;
+        humFilter.type = "lowpass";
+        humFilter.frequency.value = 180;
+        humOsc.connect(humFilter).connect(humGain).connect(audio.destination);
+        humOsc.start();
+      }
+
+      function tone(frequency, duration, type, volume, slideTo) {
+        if (!audio) return;
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        const now = audio.currentTime;
+        oscillator.type = type || "square";
+        oscillator.frequency.setValueAtTime(frequency, now);
+        if (slideTo) oscillator.frequency.exponentialRampToValueAtTime(slideTo, now + duration);
+        gain.gain.setValueAtTime(volume, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        oscillator.connect(gain).connect(audio.destination);
+        oscillator.start(now);
+        oscillator.stop(now + duration);
+      }
+
+      function noise(duration, volume) {
+        if (!audio) return;
+        const length = Math.floor(audio.sampleRate * duration);
+        const buffer = audio.createBuffer(1, length, audio.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+        const source = audio.createBufferSource();
+        const gain = audio.createGain();
+        source.buffer = buffer;
+        gain.gain.value = volume;
+        source.connect(gain).connect(audio.destination);
+        source.start();
+      }
+
+      function fire() {
+        if (state !== "playing" || playerBullet || ship.fireTimer > 0) return;
+        playerBullet = { x: ship.x, y: ship.y - 28, speed: 560 };
+        ship.fireTimer = 0.12;
+        tone(920, 0.12, "square", 0.055, 280);
+      }
+
+      function fireSuperBomb() {
+        if (state !== "playing" || superBombs <= 0 || bombProjectile) return;
+        superBombs--;
+        bombProjectile = { x: ship.x, y: ship.y - 28, speed: 430 };
+        tone(240, 0.22, "sawtooth", 0.085, 680);
+      }
+
+      function fireFreezeArrow() {
+        if (state !== "playing" || freezeArrows <= 0 || freezeArrow) return;
+        freezeArrows--;
+        freezeArrow = { x: ship.x, y: ship.y - 28, speed: 500 };
+        tone(720, 0.16, "triangle", 0.06, 420);
+      }
+
+      function activateShield() {
+        if (state !== "playing") return;
+        shieldTimer = SHIELD_DURATION;
+        tone(360, 0.24, "sine", 0.06, 920);
+      }
+
+      function detonateFreezeArrow(x, y) {
+        freezeArrow = null;
+        freezeBurst = { x, y, life: 0.8 };
+        for (const alien of aliens) {
+          if (Math.hypot(alien.x - x, alien.y - y) <= FREEZE_RADIUS) {
+            alien.frozenTimer = FREEZE_DURATION;
+          }
+        }
+        tone(580, 0.28, "triangle", 0.08, 180);
+        tone(1050, 0.18, "sine", 0.05, 620);
+      }
+
+      function activateRapidGun() {
+        rapidGuns--;
+        rapidModeTimer = RAPID_DURATION;
+        rapidFireTimer = 0;
+        rapidChargeTimer = 0;
+        spaceNeedsRelease = true;
+        tone(170, 0.48, "sawtooth", 0.09, 760);
+      }
+
+      function fireRapidShot() {
+        rapidBullets.push({
+          x: ship.x + (Math.random() - 0.5) * 13,
+          y: ship.y - 22,
+          vx: (Math.random() - 0.5) * 55,
+          vy: -440 - Math.random() * 100
+        });
+        if (Math.random() < 0.3) tone(150 + Math.random() * 90, 0.055, "sawtooth", 0.018, 65);
+      }
+
+      function beginDogVisit() {
+        dogsThisStage++;
+        dogArrivalTimer = 0;
+        activeRiddle = nextRiddle();
+        riddleAnswer = "";
+        riddleFeedback = "";
+        state = "riddle";
+        keys.clear();
+        tone(520, 0.16, "square", 0.05, 780);
+        syncPauseButton();
+      }
+
+      function nextRiddle() {
+        if (riddleDeck.length === 0) {
+          riddleDeck = riddles.filter(riddle => riddle !== lastRiddle);
+          for (let i = riddleDeck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [riddleDeck[i], riddleDeck[j]] = [riddleDeck[j], riddleDeck[i]];
+          }
+        }
+        lastRiddle = riddleDeck.pop();
+        return lastRiddle;
+      }
+
+      function submitRiddleAnswer() {
+        const answer = riddleAnswer.trim().toLowerCase().replace(/[^a-z0-9 ]/g, "");
+        const accepted = activeRiddle.answers.some(candidate =>
+          candidate.toLowerCase().replace(/[^a-z0-9 ]/g, "") === answer
+        );
+        if (!accepted) {
+          riddleAnswer = "";
+          riddleFeedback = "Not quite! Try another answer.";
+          tone(170, 0.14, "square", 0.04, 110);
+          return;
+        }
+
+        const reward = ["bomb", "rapid", "freeze"][Math.floor(Math.random() * 3)];
+        const rewardLabel = {
+          bomb: "+1 SUPER BOMB!",
+          rapid: "+1 RAPID GUN!",
+          freeze: "+1 FREEZE ARROW!"
+        }[reward];
+        if (reward === "bomb") superBombs++;
+        else if (reward === "rapid") rapidGuns++;
+        else freezeArrows++;
+        addPopup(ship.x, ship.y - 48, rewardLabel, colors.gold);
+        tone(660, 0.18, "square", 0.07, 990);
+        tone(990, 0.24, "triangle", 0.05, 1320);
+        activeRiddle = null;
+        riddleAnswer = "";
+        riddleFeedback = "";
+        state = "playing";
+        syncPauseButton();
+      }
+
+      function updateDogTimer(dt) {
+        if (superBombs > 0 || rapidGuns > 0 || freezeArrows > 0 || rapidModeTimer > 0 ||
+            dogsThisStage >= MAX_DOG_VISITS_PER_STAGE) {
+          dogVisitTimer = null;
+          return false;
+        }
+        if (dogVisitTimer === null) {
+          dogVisitTimer = DOG_INTERVAL_MIN + Math.random() * (DOG_INTERVAL_MAX - DOG_INTERVAL_MIN);
+        }
+        dogVisitTimer -= dt;
+        if (dogVisitTimer <= 0) {
+          beginDogVisit();
+          return true;
+        }
+        return false;
+      }
+
+      function detonateSuperBomb(x, y) {
+        bombProjectile = null;
+        bombBlast = { x, y, life: 0.7 };
+        enemyBullets = enemyBullets.filter(bullet =>
+          Math.hypot(bullet.x - x, bullet.y - y) > BOMB_BLAST_RADIUS
+        );
+        noise(0.55, 0.32);
+        tone(130, 0.6, "sawtooth", 0.11, 34);
+        tone(420, 0.35, "triangle", 0.07, 70);
+
+        for (let i = aliens.length - 1; i >= 0; i--) {
+          const alien = aliens[i];
+          if (Math.hypot(alien.x - x, alien.y - y) <= BOMB_BLAST_RADIUS) {
+            destroyAlien(i);
+          }
+        }
+      }
+
+      function beginDive(leader, squadron) {
+        const start = (alien) => {
+          alien.diving = true;
+          alien.returning = 0;
+          alien.diveTime = 0;
+          alien.diveDuration = 4.1 + Math.random() * 0.8;
+          alien.startX = alien.x;
+          alien.startY = alien.y;
+          alien.targetX = ship.x;
+        };
+        leader.escorts = [];
+        start(leader);
+
+        if (squadron) {
+          const candidates = aliens
+            .filter(a => a.type === "escort" && !a.diving && a.returning <= 0 && !a.escortLeader)
+            .sort((a, b) => Math.abs(a.x - leader.x) - Math.abs(b.x - leader.x))
+            .slice(0, 2);
+          candidates.forEach((escort, index) => {
+            escort.escortLeader = leader;
+            escort.escortSide = index === 0 ? -1 : 1;
+            leader.escorts.push(escort);
+            start(escort);
+          });
+        }
+        tone(650, 0.48, "sawtooth", 0.045, 180);
+      }
+
+      function alienValue(alien) {
+        const value = { flagship: 800, escort: 400, purple: 160, drone: 80 }[alien.type];
+        return value * (alien.diving ? 2 : 1);
+      }
+
+      function addPopup(x, y, text, color) {
+        popups.push({ x, y, text, color, life: 0.9 });
+      }
+
+      function destroyAlien(index) {
+        const alien = aliens[index];
+        const points = alienValue(alien);
+        score += points;
+        addPopup(alien.x, alien.y - 8, String(points), alien.type === "flagship" ? colors.gold : "#fff");
+        explode(alien.x, alien.y, typeColor(alien.type), alien.type === "flagship" ? 24 : 14);
+        if (alien.escorts) {
+          for (const escort of alien.escorts) {
+            if (aliens.includes(escort)) escort.escortLeader = null;
+          }
+        }
+        if (alien.escortLeader && aliens.includes(alien.escortLeader)) {
+          score += 500;
+          addPopup(alien.x, alien.y - 26, "BONUS 500", colors.gold);
+          alien.escortLeader.escorts = alien.escortLeader.escorts.filter(a => a !== alien);
+        }
+        aliens.splice(index, 1);
+      }
+
+      function explode(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 35 + Math.random() * 180;
+          particles.push({
+            x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+            life: 0.35 + Math.random() * 0.55,
+            size: 2 + Math.floor(Math.random() * 3),
+            color: Math.random() < 0.3 ? "#fff" : color
+          });
+        }
+        noise(0.16, 0.12);
+      }
+
+      function loseLife() {
+        if (ship.invulnerable > 0 || state !== "playing") return;
+        lives--;
+        explode(ship.x, ship.y, colors.cyan, 24);
+        noise(0.32, 0.2);
+        tone(190, 0.42, "sawtooth", 0.075, 38);
+        ship.invulnerable = 2.1;
+        if (lives <= 0) {
+          state = "gameover";
+          syncPauseButton();
+          humGain && humGain.gain.setTargetAtTime(0, audio.currentTime, 0.12);
+          if (score > highScore) {
+            highScore = score;
+            saveHighScore();
+          }
+        }
+      }
+
+      function update(dt) {
+        elapsed += dt;
+        for (const star of stars) {
+          star.y += star.speed * dt;
+          star.phase += dt * (1.2 + star.speed / 50);
+          if (star.y > H) {
+            star.y = -2;
+            star.x = Math.random() * W;
+          }
+        }
+
+        if (state === "stage") {
+          stageTimer -= dt;
+          if (stageTimer <= 0) {
+            state = "playing";
+            makeWave();
+          }
+        }
+
+        if (state === "riddle") {
+          dogArrivalTimer = Math.min(1.1, dogArrivalTimer + dt);
+          return;
+        }
+        if (state !== "playing") return;
+        if (updateDogTimer(dt)) return;
+        if (humGain && audio) {
+          humGain.gain.setTargetAtTime(0.012 + (1 - aliens.length / 50) * 0.012, audio.currentTime, 0.2);
+          humOsc.frequency.setTargetAtTime(42 + (50 - aliens.length) * 0.72, audio.currentTime, 0.2);
+        }
+
+        const direction = (keys.has("ArrowRight") || keys.has("KeyD") ? 1 : 0)
+          - (keys.has("ArrowLeft") || keys.has("KeyA") ? 1 : 0);
+        ship.x = Math.max(34, Math.min(W - 34, ship.x + direction * ship.speed * dt));
+        ship.fireTimer = Math.max(0, ship.fireTimer - dt);
+        ship.invulnerable = Math.max(0, ship.invulnerable - dt);
+        shieldTimer = Math.max(0, shieldTimer - dt);
+        if (keys.has("Space") && rapidModeTimer <= 0) fire();
+
+        if (keys.has("Space") && rapidGuns > 0 && rapidModeTimer <= 0 && !spaceNeedsRelease) {
+          rapidChargeTimer += dt;
+          if (rapidChargeTimer >= RAPID_CHARGE_TIME) activateRapidGun();
+        }
+
+        if (rapidModeTimer > 0) {
+          rapidModeTimer = Math.max(0, rapidModeTimer - dt);
+          rapidFireTimer -= dt;
+          if (rapidFireTimer <= 0) {
+            fireRapidShot();
+            rapidFireTimer = RAPID_SHOT_INTERVAL;
+          }
+        }
+
+        formationPhase += dt * (0.7 + stage * 0.05);
+        for (const alien of aliens) {
+          if (alien.frozenTimer > 0) {
+            alien.frozenTimer = Math.max(0, alien.frozenTimer - dt);
+            continue;
+          }
+          if (alien.escortLeader) {
+            const leader = alien.escortLeader;
+            if (!aliens.includes(leader)) {
+              alien.escortLeader = null;
+            } else if (alien.diving && leader.diving) {
+              const side = alien.escortSide;
+              alien.x = leader.x + side * (34 + Math.sin(leader.diveTime * 5) * 4);
+              alien.y = leader.y + 38 + Math.abs(side) * 4;
+              continue;
+            } else {
+              alien.escortLeader = null;
+            }
+          }
+
+          if (alien.diving) {
+            alien.diveTime += dt;
+            const progress = alien.diveTime / alien.diveDuration;
+            const sweep = Math.sin(progress * Math.PI * 2);
+            alien.x = alien.startX + sweep * (90 + Math.min(stage * 5, 65)) + (ship.x - alien.startX) * Math.min(progress, 1) * 0.28;
+            alien.y = alien.startY + progress * 520 + (1 - Math.cos(progress * Math.PI * 2)) * 55;
+            alien.x = Math.max(20, Math.min(W - 20, alien.x));
+            alien.anim += dt * 13;
+
+            if (Math.random() < dt * (0.22 + stage * 0.035)) {
+              enemyBullets.push({ x: alien.x, y: alien.y + 12, vx: (ship.x - alien.x) * 0.16, vy: 205 + stage * 12 });
+              tone(260, 0.08, "sawtooth", 0.018, 130);
+            }
+            if (alien.y > H + 24 || progress >= 1) {
+              alien.diving = false;
+              alien.escortLeader = null;
+              alien.returning = 1.25;
+              alien.returnX = alien.x;
+              alien.returnY = -30;
+            }
+          } else if (alien.returning > 0) {
+            alien.returning = Math.max(0, alien.returning - dt);
+            const p = 1 - alien.returning / 1.25;
+            alien.x = alien.returnX + ((alien.baseX + Math.sin(formationPhase) * 28) - alien.returnX) * p;
+            alien.y = alien.returnY + (alien.rowY - alien.returnY) * p;
+            alien.anim += dt * 8;
+          } else {
+            alien.x = alien.baseX + Math.sin(formationPhase) * 28;
+            alien.y = alien.rowY + Math.sin(formationPhase * 1.6 + alien.col) * 2;
+            alien.anim += dt * 5;
+          }
+        }
+
+        diveTimer -= dt;
+        if (diveTimer <= 0) {
+          const available = aliens.filter(a =>
+            !a.diving && a.returning <= 0 && !a.escortLeader && a.frozenTimer <= 0
+          );
+          if (available.length) {
+            const leader = available[Math.floor(Math.random() * available.length)];
+            beginDive(leader, leader.type === "flagship" && Math.random() < 0.72);
+          }
+          diveTimer = Math.max(0.5, (2.8 - stage * 0.16) * (0.65 + Math.random() * 0.8));
+        }
+
+        if (playerBullet) {
+          playerBullet.y -= playerBullet.speed * dt;
+          if (playerBullet.y < -12) playerBullet = null;
+          else {
+            for (let i = aliens.length - 1; i >= 0; i--) {
+              const alien = aliens[i];
+              if (Math.abs(playerBullet.x - alien.x) < (alien.type === "flagship" ? 20 : 15) && Math.abs(playerBullet.y - alien.y) < 17) {
+                destroyAlien(i);
+                playerBullet = null;
+                break;
+              }
+            }
+          }
+        }
+
+        for (let i = rapidBullets.length - 1; i >= 0; i--) {
+          const bullet = rapidBullets[i];
+          bullet.x += bullet.vx * dt;
+          bullet.y += bullet.vy * dt;
+          if (bullet.y < -24 || bullet.x < -12 || bullet.x > W + 12) {
+            rapidBullets.splice(i, 1);
+            continue;
+          }
+          const hitIndex = aliens.findIndex(alien =>
+            Math.abs(bullet.x - alien.x) < (alien.type === "flagship" ? 20 : 15) &&
+            Math.abs(bullet.y - alien.y) < 19
+          );
+          if (hitIndex !== -1) {
+            destroyAlien(hitIndex);
+            rapidBullets.splice(i, 1);
+          }
+        }
+
+        if (freezeArrow) {
+          freezeArrow.y -= freezeArrow.speed * dt;
+          if (freezeArrow.y < -20) {
+            freezeArrow = null;
+          } else {
+            const target = aliens.find(alien =>
+              Math.abs(freezeArrow.x - alien.x) < 18 &&
+              Math.abs(freezeArrow.y - alien.y) < 18
+            );
+            if (target) detonateFreezeArrow(target.x, target.y);
+          }
+        }
+        if (freezeBurst) {
+          freezeBurst.life -= dt;
+          if (freezeBurst.life <= 0) freezeBurst = null;
+        }
+
+        if (bombProjectile) {
+          bombProjectile.y -= bombProjectile.speed * dt;
+          if (bombProjectile.y < -12) {
+            bombProjectile = null;
+          } else {
+            const target = aliens.find(alien =>
+              Math.abs(bombProjectile.x - alien.x) < 18 &&
+              Math.abs(bombProjectile.y - alien.y) < 18
+            );
+            if (target) detonateSuperBomb(target.x, target.y);
+          }
+        }
+        if (bombBlast) {
+          bombBlast.life -= dt;
+          if (bombBlast.life <= 0) bombBlast = null;
+        }
+
+        if (Math.random() < dt * (0.42 + stage * 0.06) && aliens.length) {
+          const shooter = aliens[Math.floor(Math.random() * aliens.length)];
+          if (!shooter.escortLeader && shooter.frozenTimer <= 0) {
+            enemyBullets.push({ x: shooter.x, y: shooter.y + 12, vx: (ship.x - shooter.x) * 0.1, vy: 150 + stage * 14 });
+          }
+        }
+        let shipHit = false;
+        for (let i = enemyBullets.length - 1; i >= 0; i--) {
+          const bullet = enemyBullets[i];
+          bullet.x += bullet.vx * dt;
+          bullet.y += bullet.vy * dt;
+          if (bullet.y > H + 10 || bullet.x < -10 || bullet.x > W + 10) {
+            enemyBullets.splice(i, 1);
+          } else if (ship.invulnerable <= 0 && shieldTimer <= 0 &&
+                     Math.abs(bullet.x - ship.x) < 16 && Math.abs(bullet.y - ship.y) < 22) {
+            enemyBullets.splice(i, 1);
+            loseLife();
+            shipHit = true;
+            break;
+          }
+        }
+        if (shipHit) enemyBullets = [];
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const particle = particles[i];
+          particle.x += particle.vx * dt;
+          particle.y += particle.vy * dt;
+          particle.vx *= 0.985;
+          particle.vy *= 0.985;
+          particle.life -= dt;
+          if (particle.life <= 0) particles.splice(i, 1);
+        }
+        for (let i = popups.length - 1; i >= 0; i--) {
+          popups[i].y -= 30 * dt;
+          popups[i].life -= dt;
+          if (popups[i].life <= 0) popups.splice(i, 1);
+        }
+
+        if (aliens.length === 0) {
+          state = "stage";
+          stage++;
+          stageTimer = 1.8;
+          enemyBullets = [];
+          tone(520, 0.24, "square", 0.06, 1040);
+        }
+      }
+
+      function typeColor(type) {
+        return { flagship: colors.gold, escort: colors.red, purple: colors.purple, drone: colors.blue }[type];
+      }
+
+      function drawStars() {
+        for (const star of stars) {
+          const twinkle = 0.48 + Math.sin(star.phase) * 0.35;
+          ctx.globalAlpha = twinkle;
+          ctx.fillStyle = star.color;
+          ctx.fillRect(Math.round(star.x), Math.round(star.y), star.size, star.size);
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      function drawShip(x, y, scale) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "#f4f3ff";
+        ctx.fillRect(-3, -23, 6, 25);
+        ctx.fillRect(-7, -13, 14, 8);
+        ctx.fillStyle = "#e83e5a";
+        ctx.fillRect(-13, -10, 7, 18);
+        ctx.fillRect(6, -10, 7, 18);
+        ctx.fillRect(-9, 2, 18, 5);
+        ctx.fillStyle = "#56caff";
+        ctx.fillRect(-5, 5, 4, 8);
+        ctx.fillRect(2, 5, 4, 8);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(-2, -17, 4, 6);
+        ctx.restore();
+      }
+
+      function drawDog(x, y) {
+        ctx.save();
+        ctx.translate(Math.round(x), Math.round(y));
+        const tailLift = Math.sin(elapsed * 12) * 5;
+        ctx.fillStyle = "#b96e3d";
+        ctx.fillRect(-48, -12, 88, 42);
+        ctx.fillRect(-35, 25, 16, 16);
+        ctx.fillRect(22, 23, 16, 18);
+        ctx.fillRect(26, -38, 48, 48);
+        ctx.fillRect(36, -52, 13, 22);
+        ctx.fillRect(61, -49, 13, 20);
+        ctx.fillRect(-58, -7 + tailLift, 18, 9);
+        ctx.fillStyle = "#75432f";
+        ctx.fillRect(36, -52, 13, 8);
+        ctx.fillRect(61, -49, 13, 8);
+        ctx.fillRect(66, -13, 8, 8);
+        ctx.fillRect(-31, 31, 8, 10);
+        ctx.fillRect(27, 30, 8, 10);
+        ctx.fillStyle = "#ffe0a2";
+        ctx.fillRect(60, -13, 17, 15);
+        ctx.fillRect(47, 1, 21, 10);
+        ctx.fillStyle = "#171522";
+        ctx.fillRect(58, -32, 5, 5);
+        ctx.fillRect(72, -7, 6, 5);
+        ctx.fillStyle = "#f36a78";
+        ctx.fillRect(-4, -10, 27, 8);
+        ctx.fillStyle = "#ffe0a2";
+        ctx.fillRect(-2, -10, 6, 8);
+        ctx.restore();
+      }
+
+      function drawAlien(alien) {
+        const color = typeColor(alien.type);
+        const flap = Math.sin(alien.anim) > 0 ? 1 : 0;
+        const tilt = alien.diving ? Math.sin(alien.diveTime * 4) * 0.28 : 0;
+        ctx.save();
+        ctx.translate(Math.round(alien.x), Math.round(alien.y));
+        ctx.rotate(tilt);
+        const wing = alien.type === "flagship" ? 19 : 14;
+        ctx.fillStyle = color;
+        ctx.fillRect(-5, -8, 10, 15);
+        ctx.fillRect(-10, -5, 20, 6);
+        ctx.fillRect(-wing, -2 - flap * 3, 10, 5);
+        ctx.fillRect(wing - 10, -2 - flap * 3, 10, 5);
+        ctx.fillRect(-8, 6, 5, 5);
+        ctx.fillRect(3, 6, 5, 5);
+        if (alien.type === "flagship") {
+          ctx.fillStyle = "#fff6b8";
+          ctx.fillRect(-3, -5, 6, 4);
+          ctx.fillStyle = colors.red;
+          ctx.fillRect(-wing - 3, -2 - flap * 3, 4, 5);
+          ctx.fillRect(wing - 1, -2 - flap * 3, 4, 5);
+        } else {
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(-4, -4, 3, 3);
+          ctx.fillRect(2, -4, 3, 3);
+        }
+        ctx.restore();
+        if (alien.frozenTimer > 0) {
+          const shimmer = 0.72 + Math.sin(elapsed * 12 + alien.x) * 0.16;
+          ctx.save();
+          ctx.globalAlpha = shimmer;
+          ctx.translate(Math.round(alien.x), Math.round(alien.y));
+          ctx.strokeStyle = "#b8f5ff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#e3ffff";
+          ctx.beginPath();
+          ctx.moveTo(-20, -7);
+          ctx.lineTo(-16, -14);
+          ctx.lineTo(-12, -7);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(11, 8);
+          ctx.lineTo(16, 1);
+          ctx.lineTo(21, 8);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
+      function drawHud() {
+        ctx.fillStyle = "#d6e5ff";
+        ctx.font = "16px 'Courier New', monospace";
+        ctx.textBaseline = "top";
+        ctx.textAlign = "left";
+        ctx.fillText("1UP", 22, 8);
+        ctx.fillText(String(score).padStart(6, "0"), 22, 28);
+        ctx.textAlign = "center";
+        ctx.fillStyle = colors.gold;
+        ctx.fillText("HIGH SCORE", W / 2, 8);
+        ctx.fillStyle = "#d6e5ff";
+        ctx.fillText(String(highScore).padStart(6, "0"), W / 2, 28);
+        ctx.textAlign = "right";
+        ctx.fillText(`STAGE ${String(stage).padStart(2, "0")}`, W - 22, 8);
+        ctx.textBaseline = "top";
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#d6e5ff";
+        ctx.font = "12px 'Courier New', monospace";
+        ctx.fillText(`GUNS ${lives}`, 22, 48);
+        ctx.textAlign = "right";
+        ctx.fillStyle = dogsThisStage < MAX_DOG_VISITS_PER_STAGE ? "#9fbbdd" : "#73809a";
+        ctx.fillText(`DOGS ${dogsThisStage}/${MAX_DOG_VISITS_PER_STAGE}`, W - 22, 48);
+        if (shieldTimer > 0) {
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#9ff5ff";
+          ctx.fillText(`SHIELD ${shieldTimer.toFixed(1)}s`, W / 2, 48);
+        }
+        for (let i = 0; i < lives; i++) drawShip(36 + i * 27, H - 22, 0.48);
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "right";
+        ctx.fillStyle = colors.gold;
+        ctx.font = "13px 'Courier New', monospace";
+        ctx.fillText(`BOMBS ${superBombs} [Z]`, W - 22, H - 22);
+        ctx.textAlign = "right";
+        ctx.fillStyle = freezeArrows > 0 ? "#a9efff" : "#73809a";
+        ctx.fillText(`ICE ${freezeArrows} [X]`, W - 145, H - 22);
+        ctx.textAlign = "center";
+        ctx.fillStyle = rapidModeTimer > 0 ? "#ffac43" : (rapidGuns > 0 ? "#8fffea" : "#73809a");
+        const rapidLabel = rapidModeTimer > 0
+          ? `FLAME ${rapidModeTimer.toFixed(1)}s`
+          : `FLAME ${rapidGuns}${rapidGuns > 0 ? " [HOLD SPACE]" : ""}`;
+        ctx.fillText(rapidLabel, W / 2, H - 22);
+        ctx.strokeStyle = "#345071";
+        ctx.beginPath();
+        ctx.moveTo(20, 66);
+        ctx.lineTo(W - 20, 66);
+        ctx.stroke();
+      }
+
+      function drawTitle() {
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowColor = "#37d9ff";
+        ctx.shadowBlur = 22;
+        ctx.fillStyle = "#d9f9ff";
+        ctx.font = "bold 58px 'Courier New', monospace";
+        ctx.fillText("GALAXIAN", W / 2, 180);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = colors.gold;
+        ctx.font = "16px 'Courier New', monospace";
+        ctx.fillText("STAR PATROL", W / 2, 226);
+
+        const legend = [
+          ["flagship", "GALBOSS", "800 PTS"],
+          ["escort", "RED ESCORT", "400 PTS"],
+          ["purple", "PURPLE DIVER", "160 PTS"],
+          ["drone", "BLUE DRONE", "80 PTS"]
+        ];
+        ctx.font = "14px 'Courier New', monospace";
+        legend.forEach(([type, name, points], index) => {
+          const y = 316 + index * 36;
+          drawAlien({ type, x: 190, y, anim: elapsed * 4, diving: false });
+          ctx.textAlign = "left";
+          ctx.fillStyle = typeColor(type);
+          ctx.fillText(name, 230, y);
+          ctx.textAlign = "right";
+          ctx.fillStyle = "#e1e9fa";
+          ctx.fillText(points, 420, y);
+        });
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#a9c7e7";
+        ctx.font = "13px 'Courier New', monospace";
+        ctx.fillText("DIVING ALIENS ARE WORTH DOUBLE", W / 2, 500);
+        ctx.fillStyle = "#ffe45c";
+        ctx.fillText("SHOOT ESCORTS FOR A SQUADRON BONUS", W / 2, 526);
+
+        if (Math.floor(elapsed * 2) % 2 === 0) {
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 17px 'Courier New', monospace";
+          ctx.fillText("PRESS ENTER OR SPACE TO START", W / 2, 610);
+        }
+        ctx.fillStyle = "#8ea2c3";
+        ctx.font = "13px 'Courier New', monospace";
+        ctx.fillText(`HIGH SCORE  ${String(highScore).padStart(6, "0")}`, W / 2, 682);
+        drawShip(W / 2, 748, 0.85);
+      }
+
+      function drawRiddle() {
+        ctx.fillStyle = "#030611eF";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#11182e";
+        ctx.fillRect(42, 190, W - 84, 430);
+        ctx.strokeStyle = "#6b9ad2";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(42, 190, W - 84, 430);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = colors.gold;
+        ctx.font = "bold 24px 'Courier New', monospace";
+        ctx.fillText("A FRIENDLY DOG!", W / 2, 226);
+        const arrivalProgress = Math.min(1, dogArrivalTimer / 1.1);
+        const easedArrival = 1 - Math.pow(1 - arrivalProgress, 3);
+        const dogY = -72 + easedArrival * 388;
+        if (arrivalProgress < 1) {
+          ctx.globalAlpha = 0.45 * (1 - arrivalProgress);
+          ctx.strokeStyle = "#b8dcff";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(W / 2 - 46, dogY - 55);
+          ctx.lineTo(W / 2 - 46, dogY - 92);
+          ctx.moveTo(W / 2 + 46, dogY - 55);
+          ctx.lineTo(W / 2 + 46, dogY - 92);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        drawDog(W / 2, dogY);
+        ctx.fillStyle = "#dce9ff";
+        ctx.font = "15px 'Courier New', monospace";
+        ctx.fillText("Answer my riddle to win a random special refill:", W / 2, 386);
+
+        const words = activeRiddle.question.split(" ");
+        const lines = [];
+        let line = "";
+        for (const word of words) {
+          const nextLine = line ? `${line} ${word}` : word;
+          if (nextLine.length > 49 && line) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = nextLine;
+          }
+        }
+        if (line) lines.push(line);
+        ctx.fillStyle = "#ffe889";
+        ctx.font = "bold 16px 'Courier New', monospace";
+        lines.forEach((questionLine, index) =>
+          ctx.fillText(questionLine, W / 2, 423 + index * 23)
+        );
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 18px 'Courier New', monospace";
+        const cursor = Math.floor(elapsed * 2) % 2 === 0 ? "_" : " ";
+        ctx.fillText(`> ${riddleAnswer}${cursor}`, W / 2, 495);
+        ctx.fillStyle = riddleFeedback ? colors.red : "#9fbbdd";
+        ctx.font = "13px 'Courier New', monospace";
+        ctx.fillText(riddleFeedback || "TYPE YOUR ANSWER, THEN PRESS ENTER", W / 2, 540);
+        ctx.fillStyle = "#87ffda";
+        ctx.fillText("UP TO FOUR DOG VISITS PER STAGE", W / 2, 581);
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = "#050510";
+        ctx.fillRect(0, 0, W, H);
+        drawStars();
+        drawHud();
+
+        if (state === "title") {
+          drawTitle();
+          return;
+        }
+        for (const alien of aliens) drawAlien(alien);
+        if (playerBullet) {
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(Math.round(playerBullet.x - 2), Math.round(playerBullet.y - 10), 4, 15);
+          ctx.fillStyle = "#9cfcff";
+          ctx.fillRect(Math.round(playerBullet.x - 1), Math.round(playerBullet.y - 8), 2, 12);
+        }
+        for (const bullet of rapidBullets) {
+          ctx.fillStyle = "#ff672f";
+          ctx.beginPath();
+          ctx.moveTo(bullet.x, bullet.y - 17);
+          ctx.lineTo(bullet.x + 6, bullet.y + 5);
+          ctx.lineTo(bullet.x, bullet.y + 1);
+          ctx.lineTo(bullet.x - 6, bullet.y + 5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#ffe47b";
+          ctx.fillRect(Math.round(bullet.x - 1), Math.round(bullet.y - 11), 2, 12);
+        }
+        if (freezeArrow) {
+          ctx.save();
+          ctx.translate(freezeArrow.x, freezeArrow.y);
+          ctx.shadowColor = "#8ff5ff";
+          ctx.shadowBlur = 12;
+          ctx.fillStyle = "#e7ffff";
+          ctx.beginPath();
+          ctx.moveTo(0, -17);
+          ctx.lineTo(9, -2);
+          ctx.lineTo(4, -4);
+          ctx.lineTo(4, 10);
+          ctx.lineTo(-4, 10);
+          ctx.lineTo(-4, -4);
+          ctx.lineTo(-9, -2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#72dfff";
+          ctx.fillRect(-2, 8, 4, 12);
+          ctx.restore();
+        }
+        for (const bullet of enemyBullets) {
+          ctx.fillStyle = "#ff5570";
+          ctx.fillRect(Math.round(bullet.x - 3), Math.round(bullet.y - 5), 6, 11);
+          ctx.fillStyle = "#ffd1d9";
+          ctx.fillRect(Math.round(bullet.x - 1), Math.round(bullet.y - 4), 2, 7);
+        }
+        if (bombProjectile) {
+          ctx.fillStyle = "#ffb52e";
+          ctx.beginPath();
+          ctx.arc(bombProjectile.x, bombProjectile.y, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#fff4a8";
+          ctx.beginPath();
+          ctx.arc(bombProjectile.x, bombProjectile.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (freezeBurst) {
+          const progress = 1 - freezeBurst.life / 0.8;
+          const radius = FREEZE_RADIUS * Math.min(1, progress * 2.2);
+          const fade = Math.min(1, freezeBurst.life * 2.4);
+          const gradient = ctx.createRadialGradient(
+            freezeBurst.x, freezeBurst.y, radius * 0.08,
+            freezeBurst.x, freezeBurst.y, Math.max(radius, 1)
+          );
+          gradient.addColorStop(0, `rgba(239,255,255,${0.8 * fade})`);
+          gradient.addColorStop(0.35, `rgba(120,235,255,${0.55 * fade})`);
+          gradient.addColorStop(0.78, `rgba(73,178,255,${0.3 * fade})`);
+          gradient.addColorStop(1, "rgba(70,170,255,0)");
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(freezeBurst.x, freezeBurst.y, Math.max(radius, 1), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (bombBlast) {
+          const progress = 1 - bombBlast.life / 0.7;
+          const radius = BOMB_BLAST_RADIUS * Math.min(1, progress * 2.4);
+          const fade = Math.min(1, bombBlast.life * 2.2);
+          const gradient = ctx.createRadialGradient(bombBlast.x, bombBlast.y, radius * 0.12, bombBlast.x, bombBlast.y, radius);
+          gradient.addColorStop(0, `rgba(255,255,225,${0.95 * fade})`);
+          gradient.addColorStop(0.35, `rgba(255,210,55,${0.75 * fade})`);
+          gradient.addColorStop(0.72, `rgba(255,92,25,${0.48 * fade})`);
+          gradient.addColorStop(1, "rgba(255,45,20,0)");
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(bombBlast.x, bombBlast.y, Math.max(radius, 1), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        for (const particle of particles) {
+          ctx.globalAlpha = Math.min(1, particle.life * 2);
+          ctx.fillStyle = particle.color;
+          ctx.fillRect(Math.round(particle.x), Math.round(particle.y), particle.size, particle.size);
+        }
+        ctx.globalAlpha = 1;
+        for (const popup of popups) {
+          ctx.globalAlpha = Math.min(1, popup.life * 2);
+          ctx.fillStyle = popup.color;
+          ctx.font = "bold 14px 'Courier New', monospace";
+          ctx.textAlign = "center";
+          ctx.fillText(popup.text, popup.x, popup.y);
+        }
+        ctx.globalAlpha = 1;
+
+        if ((state === "playing" || (state === "paused" && pausedFrom === "playing")) &&
+            (ship.invulnerable <= 0 || shieldTimer > 0 || Math.floor(elapsed * 12) % 2 === 0)) {
+          if (shieldTimer > 0) {
+            const pulse = 0.75 + Math.sin(elapsed * 9) * 0.12;
+            ctx.save();
+            ctx.globalAlpha = pulse;
+            ctx.strokeStyle = "#8ff5ff";
+            ctx.lineWidth = 3;
+            ctx.shadowColor = "#62eaff";
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.ellipse(ship.x, ship.y - 5, 28, 37, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+          drawShip(ship.x, ship.y, 1);
+        }
+        if (state === "stage") {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = colors.gold;
+          ctx.font = "bold 32px 'Courier New', monospace";
+          ctx.fillText(`STAGE ${stage}`, W / 2, H / 2);
+        } else if (state === "gameover") {
+          ctx.fillStyle = "#050510cc";
+          ctx.fillRect(40, 285, W - 80, 230);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = colors.red;
+          ctx.font = "bold 34px 'Courier New', monospace";
+          ctx.fillText("GAME OVER", W / 2, 344);
+          ctx.fillStyle = "#fff";
+          ctx.font = "17px 'Courier New', monospace";
+          ctx.fillText(`FINAL SCORE  ${String(score).padStart(6, "0")}`, W / 2, 405);
+          ctx.fillStyle = colors.gold;
+          ctx.fillText(`HIGH SCORE   ${String(highScore).padStart(6, "0")}`, W / 2, 438);
+          if (Math.floor(elapsed * 2) % 2 === 0) {
+            ctx.fillStyle = "#d7eaff";
+            ctx.font = "14px 'Courier New', monospace";
+            ctx.fillText("PRESS ENTER OR SPACE TO PLAY AGAIN", W / 2, 480);
+          }
+        } else if (state === "riddle") {
+          drawRiddle();
+        } else if (state === "paused") {
+          ctx.fillStyle = "#030611dd";
+          ctx.fillRect(0, 0, W, H);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = colors.gold;
+          ctx.font = "bold 38px 'Courier New', monospace";
+          ctx.fillText("PAUSED", W / 2, H / 2 - 14);
+          ctx.fillStyle = "#d6e5ff";
+          ctx.font = "15px 'Courier New', monospace";
+          ctx.fillText("PRESS ESC OR RESUME", W / 2, H / 2 + 30);
+        }
+      }
+
+      function frame(time) {
+        const dt = Math.min(0.033, (time - lastTime) / 1000 || 0);
+        lastTime = time;
+        update(dt);
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      window.addEventListener("keydown", event => {
+        if (event.code === "Escape" && !event.repeat) {
+          event.preventDefault();
+          togglePause();
+          return;
+        }
+        if (state === "paused") return;
+        if (state === "riddle") {
+          event.preventDefault();
+          if (event.key === "Enter") {
+            submitRiddleAnswer();
+          } else if (event.key === "Backspace") {
+            riddleAnswer = riddleAnswer.slice(0, -1);
+            riddleFeedback = "";
+          } else if (event.key.length === 1 && riddleAnswer.length < 32) {
+            riddleAnswer += event.key.toLowerCase();
+            riddleFeedback = "";
+          }
+          return;
+        }
+        if (["ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
+        keys.add(event.code);
+        if (event.code === "KeyS" && state === "playing" && !event.repeat) {
+          unlockAudio();
+          activateShield();
+        } else if (event.code === "KeyX" && state === "playing" && !event.repeat) {
+          unlockAudio();
+          fireFreezeArrow();
+        } else if (event.code === "KeyZ" && state === "playing" && !event.repeat) {
+          unlockAudio();
+          fireSuperBomb();
+        } else if (event.code === "Enter" || (event.code === "Space" && state !== "playing")) {
+          if (state === "title" || state === "gameover") startGame();
+        } else if (event.code === "Space" && state === "playing") {
+          unlockAudio();
+          fire();
+        }
+      });
+      pauseButton.addEventListener("click", togglePause);
+      window.addEventListener("keyup", event => {
+        keys.delete(event.code);
+        if (event.code === "Space") {
+          rapidChargeTimer = 0;
+          spaceNeedsRelease = false;
+        }
+      });
+      window.addEventListener("blur", () => keys.clear());
+
+      canvas.addEventListener("pointermove", event => {
+        if (state !== "playing") return;
+        const bounds = canvas.getBoundingClientRect();
+        ship.x = Math.max(34, Math.min(W - 34, (event.clientX - bounds.left) * W / bounds.width));
+      });
+      canvas.addEventListener("pointerdown", () => {
+        if (state === "title" || state === "gameover") startGame();
+        else if (state === "playing") {
+          unlockAudio();
+          fire();
+        }
+      });
+
+      initStars();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
