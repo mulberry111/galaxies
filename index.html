@@ -115,9 +115,9 @@
       const MAX_GUNS = 6;
       const MAX_SUPER_BOMBS = 3;
       const BOMB_BLAST_RADIUS = 100;
-      const MAX_FREEZE_ARROWS = 4;
+      const MAX_FREEZE_ARROWS = 2;
       const FREEZE_RADIUS = 100;
-      const FREEZE_DURATION = 3;
+      const FREEZE_DURATION = 2;
       const SHIELD_DURATION = 5;
       const MAX_RAPID_GUNS = 3;
       const RAPID_CHARGE_TIME = 2;
@@ -263,7 +263,6 @@
 
       function makeWave() {
         aliens = [];
-        freezeArrows = MAX_FREEZE_ARROWS;
         dogsThisStage = 0;
         dogVisitTimer = null;
         const rows = [
@@ -286,6 +285,8 @@
               x: startX + col * row.spacing,
               y: row.y,
               frozenTimer: 0,
+              dropPending: false,
+              dropping: false,
               diving: false,
               returning: 0,
               diveTime: 0,
@@ -423,6 +424,11 @@
         for (const alien of aliens) {
           if (Math.hypot(alien.x - x, alien.y - y) <= FREEZE_RADIUS) {
             alien.frozenTimer = FREEZE_DURATION;
+             alien.dropPending = false;
+             alien.dropping = false;
+             alien.diving = false;
+             alien.escortLeader = null;
+             alien.returning = 0;
           }
         }
         tone(580, 0.28, "triangle", 0.08, 180);
@@ -492,7 +498,7 @@
         }[reward];
         if (reward === "bomb") superBombs++;
         else if (reward === "rapid") rapidGuns++;
-        else freezeArrows++;
+        else freezeArrows = Math.min(MAX_FREEZE_ARROWS, freezeArrows + 1);
         addPopup(ship.x, ship.y - 48, rewardLabel, colors.gold);
         tone(660, 0.18, "square", 0.07, 990);
         tone(990, 0.24, "triangle", 0.05, 1320);
@@ -504,7 +510,7 @@
       }
 
       function updateDogTimer(dt) {
-        if (superBombs > 0 || rapidGuns > 0 || freezeArrows > 0 || rapidModeTimer > 0 ||
+        if (superBombs > 0 || rapidGuns > 0 || rapidModeTimer > 0 ||
             dogsThisStage >= MAX_DOG_VISITS_PER_STAGE) {
           dogVisitTimer = null;
           return false;
@@ -682,6 +688,25 @@
         for (const alien of aliens) {
           if (alien.frozenTimer > 0) {
             alien.frozenTimer = Math.max(0, alien.frozenTimer - dt);
+            alien.y += 55 * dt;
+            alien.anim += dt * 5;
+            if (alien.y > H + 24) {
+              alien.frozenTimer = 0;
+              alien.dropPending = false;
+              alien.dropping = true;
+              alien.y = H + 24;
+              continue;
+            }
+            if (alien.frozenTimer <= 0) alien.dropPending = true;
+            continue;
+          }
+          if (alien.dropPending) {
+            alien.dropPending = false;
+            alien.dropping = true;
+          }
+          if (alien.dropping) {
+            alien.y += 520 * dt;
+            alien.anim += dt * 13;
             continue;
           }
           if (alien.escortLeader) {
@@ -731,10 +756,22 @@
           }
         }
 
+        aliens = aliens.filter(alien => !alien.dropping || alien.y <= H + 24);
+
+        for (let i = aliens.length - 1; i >= 0; i--) {
+          const alien = aliens[i];
+          if (alien.frozenTimer > 0 && ship.invulnerable <= 0 && shieldTimer <= 0 &&
+              Math.abs(alien.x - ship.x) < 22 &&
+              Math.abs(alien.y - ship.y) < 28) {
+            loseLife();
+          }
+        }
+
         diveTimer -= dt;
         if (diveTimer <= 0) {
           const available = aliens.filter(a =>
-            !a.diving && a.returning <= 0 && !a.escortLeader && a.frozenTimer <= 0
+            !a.diving && a.returning <= 0 && !a.escortLeader &&
+            a.frozenTimer <= 0 && !a.dropPending && !a.dropping
           );
           if (available.length) {
             const leader = available[Math.floor(Math.random() * available.length)];
@@ -812,7 +849,7 @@
 
         if (Math.random() < dt * (0.42 + stage * 0.06) && aliens.length) {
           const shooter = aliens[Math.floor(Math.random() * aliens.length)];
-          if (!shooter.escortLeader && shooter.frozenTimer <= 0) {
+          if (!shooter.escortLeader) {
             enemyBullets.push({ x: shooter.x, y: shooter.y + 12, vx: (ship.x - shooter.x) * 0.1, vy: 150 + stage * 14 });
           }
         }
